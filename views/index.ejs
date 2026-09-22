@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Mini Format Factory</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 40px auto;
+            padding: 20px;
+        }
+
+        h1 {
+            text-align: center;
+        }
+
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        input,
+        select,
+        button {
+            padding: 12px;
+        }
+
+        button {
+            cursor: pointer;
+        }
+
+        #progressContainer {
+            display: none;
+            margin-top: 25px;
+        }
+
+        progress {
+            width: 100%;
+            height: 25px;
+        }
+
+        #percentage {
+            text-align: center;
+            font-weight: bold;
+        }
+
+        #result {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Mini Format Factory</h1>
+
+    <form id="convertForm">
+
+        <label for="video">
+            Sélectionne une vidéo :
+        </label>
+
+        <input
+            type="file"
+            id="video"
+            name="video"
+            accept="video/*"
+            required
+        >
+
+        <label for="format">
+            Format de sortie :
+        </label>
+
+        <select id="format" name="format">
+            <option value="mp4">MP4</option>
+            <option value="webm">WebM</option>
+            <option value="mp3">MP3 (audio uniquement)</option>
+            <option value="wav">WAV (audio uniquement)</option>
+        </select>
+
+        <button type="submit" id="convertButton">
+            Convertir
+        </button>
+
+    </form>
+
+    <div id="progressContainer">
+
+        <p id="status">Préparation...</p>
+
+        <progress
+            id="progressBar"
+            value="0"
+            max="100"
+        ></progress>
+
+        <p id="percentage">0 %</p>
+
+    </div>
+
+    <div id="result"></div>
+
+    <script src="/script.js"></script>
+
+</body>
+</html>
