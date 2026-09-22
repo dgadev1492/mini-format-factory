@@ -2,6 +2,17 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
+
+// Chemins absolus
+const rootDir = process.cwd();
+
+const uploadsDir = path.join(rootDir, "uploads");
+const convertedDir = path.join(rootDir, "converted");
+
+// Création des dossiers si nécessaire
+fs.mkdirSync(uploadsDir, { recursive: true });
+fs.mkdirSync(convertedDir, { recursive: true });
 
 // Stockage temporaire des conversions
 export const jobs = new Map();
@@ -43,7 +54,16 @@ const formats = {
     }
 };
 
-// Récupérer la durée d'un média avec ffprobe
+// Supprimer un fichier sans interrompre le programme
+function removeFile(filePath) {
+    fs.unlink(filePath, (error) => {
+        if (error && error.code !== "ENOENT") {
+            console.error("Erreur de suppression :", error);
+        }
+    });
+}
+
+// Récupérer la durée d'un média avec FFprobe
 function getDuration(inputPath) {
     return new Promise((resolve, reject) => {
         const probe = spawn("ffprobe", [
@@ -54,9 +74,14 @@ function getDuration(inputPath) {
         ]);
 
         let output = "";
+        let errorOutput = "";
 
         probe.stdout.on("data", (data) => {
             output += data.toString();
+        });
+
+        probe.stderr.on("data", (data) => {
+            errorOutput += data.toString();
         });
 
         probe.on("error", reject);
@@ -64,9 +89,15 @@ function getDuration(inputPath) {
         probe.on("close", (code) => {
             const duration = Number.parseFloat(output.trim());
 
-            if (code !== 0 || !Number.isFinite(duration) || duration <= 0) {
+            if (
+                code !== 0 ||
+                !Number.isFinite(duration) ||
+                duration <= 0
+            ) {
                 return reject(
-                    new Error("Impossible de déterminer la durée du média.")
+                    new Error(
+                        errorOutput || "Impossible de déterminer la durée du média."
+                    )
                 );
             }
 
@@ -79,7 +110,7 @@ function getDuration(inputPath) {
 export async function convertVideo(req, res) {
     if (!req.file) {
         return res.status(400).json({
-            error: "Aucune vidéo envoyée."
+            error: "Aucun fichier envoyé."
         });
     }
 
@@ -87,7 +118,7 @@ export async function convertVideo(req, res) {
     const format = req.body.format;
 
     if (!Object.hasOwn(formats, format)) {
-        fs.unlink(inputPath, () => {});
+        removeFile(inputPath);
 
         return res.status(400).json({
             error: "Format de sortie non autorisé."
@@ -99,16 +130,18 @@ export async function convertVideo(req, res) {
     try {
         duration = await getDuration(inputPath);
     } catch (error) {
-        fs.unlink(inputPath, () => {});
+        removeFile(inputPath);
+
+        console.error("Erreur FFprobe :", error);
 
         return res.status(400).json({
-            error: error.message
+            error: "Impossible de lire ce média. Vérifie que le fichier est valide."
         });
     }
 
     const jobId = randomUUID();
     const outputName = jobId + formats[format].extension;
-    const outputPath = path.resolve("converted", outputName);
+    const outputPath = path.join(convertedDir, outputName);
 
     const job = {
         id: jobId,
@@ -129,9 +162,25 @@ export async function convertVideo(req, res) {
         outputPath
     ];
 
-    const ffmpeg = spawn("ffmpeg", args);
+    let ffmpeg;
+
+    try {
+        ffmpeg = spawn("ffmpeg", args);
+    } catch (error) {
+        removeFile(inputPath);
+
+        job.status = "error";
+        job.error = "Impossible de démarrer FFmpeg.";
+
+        console.error(error);
+
+        return res.status(500).json({
+            error: job.error
+        });
+    }
 
     let progressData = "";
+    let stderrData = "";
 
     ffmpeg.stdout.on("data", (data) => {
         progressData += data.toString();
@@ -150,47 +199,56 @@ export async function convertVideo(req, res) {
 
                     job.progress = Math.min(
                         99,
-                        Math.max(0, Math.floor(seconds / duration * 100))
+                        Math.max(
+                            0,
+                            Math.floor((seconds / duration) * 100)
+                        )
                     );
                 }
-            }
-
-            if (key === "progress" && value === "end") {
-                job.progress = 100;
             }
         }
     });
 
     ffmpeg.stderr.on("data", (data) => {
+        stderrData += data.toString();
+
+        // Éviter de conserver un journal trop volumineux
+        if (stderrData.length > 10000) {
+            stderrData = stderrData.slice(-10000);
+        }
+
         console.error(data.toString());
     });
 
     ffmpeg.on("error", (error) => {
+        removeFile(inputPath);
+        removeFile(outputPath);
+
         job.status = "error";
         job.error = "Impossible de démarrer FFmpeg.";
 
-        console.error(error);
-
-        fs.unlink(inputPath, () => {});
+        console.error("Erreur FFmpeg :", error);
     });
 
     ffmpeg.on("close", (code) => {
-        fs.unlink(inputPath, () => {});
+        removeFile(inputPath);
 
         if (code !== 0) {
+            removeFile(outputPath);
+
             job.status = "error";
             job.error = "La conversion a échoué.";
+
+            console.error("FFmpeg a échoué :", stderrData);
 
             return;
         }
 
         job.status = "completed";
         job.progress = 100;
-        job.downloadUrl =
-            `/download/${encodeURIComponent(outputName)}`;
+        job.downloadUrl = `/download/${encodeURIComponent(outputName)}`;
     });
 
-    // Répondre immédiatement avec l'identifiant du traitement
     return res.status(202).json({
         message: "Conversion lancée.",
         jobId

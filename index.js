@@ -1,7 +1,7 @@
 import express from 'express'
 import dotenv from 'dotenv'
 dotenv.config()
-import Routes from "./src/routes/Routes.js"
+import Routes from "./src/routes/conversion.js"
 
 const app = express()
 const PORT = process.env.PORT || 3000
